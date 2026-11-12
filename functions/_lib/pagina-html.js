@@ -85,11 +85,36 @@ details ol{margin:10px 0 2px;padding-left:20px;color:var(--dim);font-size:.92rem
 .rodape a{color:inherit}
 .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,120px);background:#0f172a;color:#fff;padding:12px 18px;border-radius:12px;font-size:.92rem;max-width:calc(100% - 32px);box-shadow:0 10px 30px rgba(0,0,0,.25);transition:transform .25s ease;z-index:9}
 .toast.on{transform:translate(-50%,0)}
+.sheet{position:fixed;inset:0;background:rgba(2,6,23,0);display:flex;align-items:flex-end;justify-content:center;z-index:10;transition:background .2s ease}
+.sheet[hidden],.sheet-card textarea[hidden]{display:none}
+.sheet.on{background:rgba(2,6,23,.55)}
+.sheet-card{background:var(--card);color:var(--tx);width:100%;max-width:460px;border-radius:22px 22px 0 0;padding:22px 20px calc(20px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .22s ease}
+.sheet.on .sheet-card{transform:none}
+.sheet-card strong{display:block;font-size:1.15rem;margin-bottom:12px}
+.sheet-card ol{margin:0 0 18px;padding:0;list-style:none;counter-reset:p}
+.sheet-card li{counter-increment:p;display:flex;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--ln)}
+.sheet-card li:last-child{border-bottom:0}
+.sheet-card li::before{content:counter(p);flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--c);color:var(--ct);font-weight:700;font-size:.9rem}
+.sheet-card textarea{width:100%;font:.8rem/1.4 ui-monospace,monospace;padding:10px;border-radius:12px;border:1px solid var(--ln);background:var(--soft);color:var(--tx);resize:none;margin-bottom:14px;word-break:break-all}
 .aviso{text-align:center;padding:30px 10px}
 .aviso h1{font-size:1.3rem}
 .aviso p{color:var(--dim)}
 .erro-valor{color:#dc2626;font-size:.82rem;margin:6px 0 0;min-height:1em}
 `;
+
+// Painel que sobe de baixo ao tocar em "Pagar no app do banco".
+const SHEET = `<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheet-titulo">
+<div class="sheet-card">
+<strong id="sheet-titulo">Código Pix copiado ✓</strong>
+<textarea id="sheet-codigo" rows="4" readonly hidden aria-label="Código Pix"></textarea>
+<ol>
+<li><span>Abra o <b>app do seu banco</b></span></li>
+<li><span>Entre em <b>Pix</b> &rarr; <b>Pix Copia e Cola</b></span></li>
+<li><span><b>Cole</b> o código, confira o recebedor e confirme</span></li>
+</ol>
+<button class="btn btn-pri" id="sheet-ok" type="button">Entendi</button>
+</div>
+</div>`;
 
 function documento({ titulo, descricao, cor, corpo, script = '' }) {
   const ct = corTexto(cor);
@@ -112,6 +137,7 @@ function documento({ titulo, descricao, cor, corpo, script = '' }) {
 <p class="rodape">Página de pagamento criada por <a href="/" target="_blank" rel="noopener">NYVEL</a></p>
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+${script ? SHEET : ''}
 ${script}
 </body>
 </html>`;
@@ -222,11 +248,21 @@ function copiarTexto(t){
 var bc=$('copiar');
 bc.onclick=function(){copiarTexto(codigo).then(function(){bc.textContent='Código copiado ✓';bc.classList.add('ok');toast('Agora abra o app do banco em Pix Copia e Cola');setTimeout(function(){bc.textContent='Copiar código Pix';bc.classList.remove('ok')},3500)},function(){toast('Não consegui copiar. Segure o dedo no QR ou tente de novo.')})};
 $('copiar-chave').onclick=function(){copiarTexto(D.chave).then(function(){toast('Chave Pix copiada')})};
+// Não existe link universal que abra "qualquer banco" no Pix: copia o código e mostra o passo a passo.
+var sheet=$('sheet');
+function fecharSheet(){sheet.classList.remove('on');setTimeout(function(){sheet.hidden=true},200)}
 $('banco').onclick=function(){
-  copiarTexto(codigo).then(function(){},function(){});
-  if(navigator.share){navigator.share({text:codigo}).catch(function(){toast('Código copiado. Abra o app do banco em Pix Copia e Cola.')})}
-  else{toast('Código copiado. Abra o app do banco em Pix Copia e Cola.')}
+  var cod=$('sheet-codigo');cod.value=codigo;
+  copiarTexto(codigo).then(function(){
+    $('sheet-titulo').textContent='Código Pix copiado ✓';cod.hidden=true;
+  },function(){
+    $('sheet-titulo').textContent='Copie o código abaixo';cod.hidden=false;
+  });
+  sheet.hidden=false;requestAnimationFrame(function(){sheet.classList.add('on')});
 };
+$('sheet-ok').onclick=fecharSheet;
+sheet.addEventListener('click',function(e){if(e.target===sheet)fecharSheet()});
+$('sheet-codigo').addEventListener('focus',function(){this.select()});
 $('compartilhar').onclick=function(){
   var url=D.url||location.href;
   if(navigator.share){navigator.share({title:document.title,text:'Pague '+D.titulo+' com Pix:',url:url}).catch(function(){})}
