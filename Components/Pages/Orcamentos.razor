@@ -1,0 +1,958 @@
+@page "/orcamentos"
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@inject PlanilhaService Planilha
+@using System.Globalization
+
+<PageTitle>Orçamentos · NYVEL</PageTitle>
+
+<!-- HERO -->
+<section class="hero" style="padding: 90px 0 40px;">
+    <div class="container hero-inner">
+        <span class="eyebrow">Orçamentos</span>
+        <h1 class="hero-title" style="font-size: clamp(2.2rem, 5vw, 3.4rem);">
+            Monte a proposta e leve o cliente ao <span class="gradient-text">próximo nível</span>.
+        </h1>
+        <p class="hero-sub">
+            Os planos vêm direto da planilha. Escolha o plano do cliente, simule o pagamento e gere o PDF na hora.
+        </p>
+    </div>
+    <div class="hero-glow" aria-hidden="true"></div>
+</section>
+
+<!-- ============ PLANOS DA PLANILHA ============ -->
+<section class="section" style="padding-top: 10px; padding-bottom: 60px;">
+    <div class="container">
+        <div class="plans-toolbar">
+            <div>
+                <h2 class="plans-title">Planos e serviços</h2>
+                <p class="plans-sub">
+                    @if (atualizadoEm is not null)
+                    {
+                        <span>Carregado da planilha às @atualizadoEm.Value.ToString("HH:mm:ss")</span>
+                    }
+                    else
+                    {
+                        <span>Dados da planilha do Google</span>
+                    }
+                </p>
+            </div>
+            <div class="plans-actions">
+                <a class="btn btn-ghost btn-sm" href="@Planilha.LinkPlanilha" target="_blank" rel="noopener">Abrir planilha</a>
+                <button class="btn btn-ghost btn-sm" @onclick="() => CarregarPlanos(true)" disabled="@carregando">
+                    @(carregando ? "Atualizando..." : "Atualizar")
+                </button>
+                <button class="btn btn-primary btn-sm" @onclick="BaixarCatalogo" disabled="@(gerandoCatalogo || planos.Count == 0)">
+                    @(gerandoCatalogo ? "Gerando PDF..." : "PDF dos planos")
+                </button>
+                <button class="btn @(editorAberto ? "btn-primary" : "btn-ghost") btn-sm" @onclick="() => editorAberto = !editorAberto">
+                    @(editorAberto ? "Fechar editor" : "Editor")
+                </button>
+            </div>
+        </div>
+
+        @if (carregando && planos.Count == 0)
+        {
+            <div class="plans-grid">
+                @for (int i = 0; i < 3; i++)
+                {
+                    <div class="plan-card skeleton"></div>
+                }
+            </div>
+        }
+        else if (erro is not null && planos.Count == 0)
+        {
+            <div class="alert alert-error">
+                <strong>Não foi possível carregar os planos.</strong>
+                <span>@erro</span>
+            </div>
+        }
+        else
+        {
+            @if (erro is not null)
+            {
+                <div class="alert alert-error" style="margin-bottom: 20px;">
+                    <span>@erro Mostrando os últimos dados carregados.</span>
+                </div>
+            }
+
+            <div class="plans-grid">
+                @foreach (var p in planos)
+                {
+                    var selecionado = planoSelecionado?.Titulo == p.Titulo;
+                    <article class="plan-card @(selecionado ? "selected" : "")">
+                        <div class="plan-card-head">
+                            <span class="eyebrow" style="margin-bottom: 6px;">Plano</span>
+                            <h3>@p.Nome</h3>
+                            <div class="plan-card-price">@Moeda(p.Preco)</div>
+                        </div>
+                        <div class="plan-card-bar"></div>
+                        <span class="plan-features-title">@p.Servicos.Count serviços inclusos</span>
+                        <ul class="plan-card-list">
+                            @foreach (var s in p.Servicos)
+                            {
+                                <li>@s</li>
+                            }
+                        </ul>
+                        <button class="btn @(selecionado ? "btn-primary" : "btn-ghost") plan-card-btn"
+                                @onclick="() => SelecionarPlano(p)">
+                            @(selecionado ? "Plano escolhido" : "Escolher este plano")
+                        </button>
+                    </article>
+                }
+            </div>
+
+            <!-- ================= EDITOR ================= -->
+            @if (editorAberto)
+            {
+                <div class="orc-block editor">
+                    <div class="editor-head">
+                        <div>
+                            <h3>Editor de planos e serviços</h3>
+                            <p>Tudo o que você alterar aqui é gravado na planilha, que funciona só como repositório.</p>
+                        </div>
+                    </div>
+
+                    @if (!Planilha.PodeGravar)
+                    {
+                        <div class="alert alert-info">
+                            A gravação ainda não está configurada. Siga o passo a passo em <code>planilha/LEIA-ME.md</code> (leva uns 5 minutos) e republique o <code>AppsScript.gs</code> com a versão nova.
+                        </div>
+                    }
+
+                    @if (mensagemEditor is not null)
+                    {
+                        <div class="alert @(editorOk ? "alert-ok" : "alert-error")">@mensagemEditor</div>
+                    }
+
+                    <!-- Abas do editor -->
+                    <div class="editor-tabs">
+                        <button class="editor-tab @(abaEditor == AbaEditor.Precos ? "active" : "")" @onclick="() => abaEditor = AbaEditor.Precos">Valores dos planos</button>
+                        <button class="editor-tab @(abaEditor == AbaEditor.Servicos ? "active" : "")" @onclick="() => abaEditor = AbaEditor.Servicos">Serviços</button>
+                        <button class="editor-tab @(abaEditor == AbaEditor.NovoPlano ? "active" : "")" @onclick="() => abaEditor = AbaEditor.NovoPlano">Novo plano</button>
+                    </div>
+
+                    @if (abaEditor == AbaEditor.Precos)
+                    {
+                        <div class="editor-precos">
+                            @foreach (var p in planos)
+                            {
+                                <div class="editor-preco-row">
+                                    <div>
+                                        <strong>@p.Nome</strong>
+                                        <span class="block-hint">Valor por ano · atual: @Moeda(p.Preco)</span>
+                                    </div>
+                                    <div class="editor-preco-input">
+                                        <input class="input" type="number" min="0" step="10"
+                                               value="@ObterPrecoEdicao(p.Titulo)"
+                                               @oninput="e => DefinirPrecoEdicao(p.Titulo, e.Value?.ToString())"
+                                               disabled="@(!Planilha.PodeGravar || salvandoEditor)" />
+                                        <button class="btn btn-primary btn-sm" @onclick="() => SalvarPreco(p)"
+                                                disabled="@(!Planilha.PodeGravar || salvandoEditor)">Salvar</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (abaEditor == AbaEditor.Servicos)
+                    {
+                        <!-- Adicionar serviço -->
+                        <div class="svc-form">
+                            <div class="field" style="margin-bottom: 0;">
+                                <label>Novo serviço</label>
+                                <input class="input" @bind="novoServico" @bind:event="oninput"
+                                       maxlength="@PlanilhaService.TamanhoMaximoServico"
+                                       placeholder="Ex.: Gestão de anúncios no Google"
+                                       disabled="@(!Planilha.PodeGravar || salvando)" />
+                            </div>
+                            <div class="field" style="margin-bottom: 0;">
+                                <label>Incluir nos planos</label>
+                                <div class="checks">
+                                    @foreach (var p in planos)
+                                    {
+                                        <label class="check">
+                                            <input type="checkbox" checked="@planosNovoServico.Contains(p.Titulo)"
+                                                   disabled="@(!Planilha.PodeGravar || salvando)"
+                                                   @onchange="e => AlternarPlanoNovoServico(p.Titulo, e.Value is true)" />
+                                            <span>@p.Nome</span>
+                                        </label>
+                                    }
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" @onclick="AdicionarServico"
+                                    disabled="@(!Planilha.PodeGravar || salvando || string.IsNullOrWhiteSpace(novoServico) || planosNovoServico.Count == 0)">
+                                @(salvando ? "Salvando..." : "Adicionar")
+                            </button>
+                        </div>
+
+                        @if (mensagemServico is not null)
+                        {
+                            <div class="alert @(servicoOk ? "alert-ok" : "alert-error")" style="margin-top: 16px;">@mensagemServico</div>
+                        }
+
+                        <!-- Lista de serviços existentes por plano -->
+                        <div class="editor-svc-list">
+                            @foreach (var p in planos)
+                            {
+                                <div class="editor-svc-plano">
+                                    <h4>@p.Nome</h4>
+                                    @if (p.Servicos.Count == 0)
+                                    {
+                                        <p class="block-hint">Nenhum serviço ainda.</p>
+                                    }
+                                    else
+                                    {
+                                        <ul class="editor-svc-items">
+                                            @foreach (var s in p.Servicos)
+                                            {
+                                                <li>
+                                                    <span>@s</span>
+                                                    <button class="editor-svc-del" title="Remover serviço"
+                                                            @onclick="() => RemoverServico(p.Titulo, s)"
+                                                            disabled="@(!Planilha.PodeGravar || salvandoEditor)">✕</button>
+                                                </li>
+                                            }
+                                        </ul>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <!-- Novo plano -->
+                        <div class="svc-form">
+                            <div class="field" style="margin-bottom: 0;">
+                                <label>Nome do plano</label>
+                                <input class="input" @bind="novoPlanoNome" @bind:event="oninput"
+                                       placeholder="Ex.: PLANO ENTERPRISE"
+                                       disabled="@(!Planilha.PodeGravar || salvandoEditor)" />
+                            </div>
+                            <div class="field" style="margin-bottom: 0;">
+                                <label>Valor por ano (R$)</label>
+                                <input class="input" type="number" min="0" step="10" @bind="novoPlanoPreco" @bind:event="oninput"
+                                       disabled="@(!Planilha.PodeGravar || salvandoEditor)" />
+                            </div>
+                            <button class="btn btn-primary" @onclick="CriarPlano"
+                                    disabled="@(!Planilha.PodeGravar || salvandoEditor || string.IsNullOrWhiteSpace(novoPlanoNome))">
+                                @(salvandoEditor ? "Criando..." : "Criar plano")
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </div>
+</section>
+
+@if (planoSelecionado is not null)
+{
+<!-- ============ MONTAR ORÇAMENTO ============ -->
+<section id="montar" class="section section-alt" style="padding-top: 70px;">
+    <div class="container">
+        <div class="section-head" style="margin-bottom: 40px;">
+            <span class="eyebrow">Proposta</span>
+            <h2>Orçamento do plano @planoSelecionado.Nome</h2>
+            <p>Preencha os dados do cliente, ajuste o que ele escolheu e gere o PDF.</p>
+        </div>
+
+        <div class="orc-layout">
+            <!-- Painel de configuração -->
+            <div class="orc-config">
+                <div class="orc-block">
+                    <h3>Dados do cliente</h3>
+                    <div class="field">
+                        <label>Nome do cliente</label>
+                        <input class="input" @bind="cliente" @bind:event="oninput" placeholder="Ex.: Maria Silva" />
+                    </div>
+                    <div class="field">
+                        <label>Empresa / Projeto (opcional)</label>
+                        <input class="input" @bind="empresa" @bind:event="oninput" placeholder="Ex.: Loja da Maria" />
+                    </div>
+                    <div class="field">
+                        <label>Observações (opcional)</label>
+                        <textarea class="input" rows="2" @bind="observacoes" @bind:event="oninput" placeholder="Detalhes, escopo, prazos..."></textarea>
+                    </div>
+                </div>
+
+                <div class="orc-block">
+                    <h3>Plano e serviços</h3>
+                    <div class="plan-picker">
+                        @foreach (var p in planos)
+                        {
+                            <button type="button"
+                                    class="plan-chip @(p.Titulo == planoSelecionado.Titulo ? "active" : "")"
+                                    @onclick="() => SelecionarPlano(p, rolar: false)">
+                                <span class="plan-chip-name">@p.Nome</span>
+                                <span class="plan-chip-price">@Moeda(p.Preco)</span>
+                            </button>
+                        }
+                    </div>
+
+                    <div class="field">
+                        <label>Preço por ano (planilha: @Moeda(planoSelecionado.Preco))</label>
+                        <input class="input" type="number" min="0" step="10" @bind="preco" @bind:event="oninput" />
+                    </div>
+
+                    <div class="field">
+                        <label>Período (anos)</label>
+                        <input class="input" type="number" min="1" max="10" step="1" @bind="anos" @bind:event="oninput" />
+                        <span class="block-hint">
+                            @if (AnosEfetivos > 1)
+                            {
+                                <span>@AnosEfetivos anos × @Moeda(PrecoEfetivo) = <strong>@Moeda(PrecoTotalPlano)</strong></span>
+                            }
+                            else
+                            {
+                                <span>Valor para 1 ano. Aumente o período para recalcular automaticamente.</span>
+                            }
+                        </span>
+                    </div>
+
+                    <div class="plan-features">
+                        <span class="plan-features-title">Serviços que entram na proposta</span>
+                        <div class="svc-checklist">
+                            @foreach (var s in planoSelecionado.Servicos)
+                            {
+                                <label class="check">
+                                    <input type="checkbox" checked="@servicosMarcados.Contains(s)"
+                                           @onchange="e => AlternarServico(s, e.Value is true)" />
+                                    <span>@s</span>
+                                </label>
+                            }
+                            @foreach (var extra in servicosExtras)
+                            {
+                                <div class="svc-extra-item">
+                                    <span>@extra.Nome</span>
+                                    <span class="svc-extra-tag">@(extra.ValorFixo ? "+ " + Moeda(extra.Valor) : "valor a combinar")</span>
+                                    <button type="button" class="editor-svc-del" title="Remover serviço"
+                                            @onclick="() => RemoverServicoExtra(extra)">✕</button>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="svc-extra-form">
+                            <input class="input" @bind="novoServicoExtra" @bind:event="oninput"
+                                   @onkeydown="TeclaServicoExtra"
+                                   maxlength="@PlanilhaService.TamanhoMaximoServico"
+                                   placeholder="Serviço extra só para este cliente" />
+                        </div>
+                        <div class="svc-extra-opcoes">
+                            <label class="check">
+                                <input type="radio" name="extra-valor" checked="@(!novoExtraValorFixo)"
+                                       @onchange="() => novoExtraValorFixo = false" />
+                                <span>Valor a combinar</span>
+                            </label>
+                            <label class="check">
+                                <input type="radio" name="extra-valor" checked="@novoExtraValorFixo"
+                                       @onchange="() => novoExtraValorFixo = true" />
+                                <span>Valor fixo</span>
+                            </label>
+                            @if (novoExtraValorFixo)
+                            {
+                                <input class="input svc-extra-valor" type="number" min="0" step="10"
+                                       placeholder="R$" @bind="novoExtraValor" @bind:event="oninput"
+                                       @onkeydown="TeclaServicoExtra" />
+                            }
+                            <button type="button" class="btn btn-ghost btn-sm" @onclick="AdicionarServicoExtra"
+                                    disabled="@(!PodeAdicionarExtra)">Adicionar</button>
+                        </div>
+                        <span class="block-hint">
+                            Aparece apenas no PDF desta proposta, sem gravar na planilha.
+                            "Valor a combinar" aparece só como texto; "Valor fixo" soma no total das formas de pagamento.
+                        </span>
+                    </div>
+                </div>
+
+                <div class="orc-block">
+                    <h3>Condições de pagamento</h3>
+                    <p class="block-hint">O cliente recebe as duas opções na proposta.</p>
+
+                    <span class="pay-group-title">Opção 1 · Entrada + parcelas</span>
+                    <div class="field-row">
+                        <div class="field">
+                            <label>Valor da entrada (R$)</label>
+                            <input class="input" type="number" min="0" step="50"
+                                   @bind="entrada" @bind:event="oninput" />
+                        </div>
+                        <div class="field">
+                            <label>Nº de parcelas</label>
+                            <input class="input" type="number" min="1" max="36" step="1"
+                                   @bind="parcelas" @bind:event="oninput" />
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Juros por parcela (% ao mês), opcional</label>
+                        <input class="input" type="number" min="0" max="20" step="0.5"
+                               @bind="jurosMes" @bind:event="oninput" />
+                    </div>
+
+                    <span class="pay-group-title">Opção 2 · À vista</span>
+                    <div class="field">
+                        <label>Desconto à vista (%)</label>
+                        <input class="input" type="number" min="0" max="100" step="1"
+                               @bind="descontoAvista" @bind:event="oninput" />
+                    </div>
+                </div>
+
+                <button class="btn btn-primary orc-generate" @onclick="BaixarPdf" disabled="@gerando">
+                    @(gerando ? "Gerando PDF..." : "Gerar e baixar PDF")
+                </button>
+            </div>
+
+            <!-- Prévia -->
+            <div class="orc-preview">
+                <div class="doc">
+                    <div class="doc-header">
+                        <div class="doc-brand">
+                            <img src="img/logo.jpg" alt="NYVEL" />
+                            <div>
+                                <strong>NYVEL</strong>
+                                <span>Assessoria Digital</span>
+                            </div>
+                        </div>
+                        <div class="doc-meta">
+                            <span>Orçamento</span>
+                            <strong>Nº @numeroOrcamento</strong>
+                            <span>@DateTime.Now.ToString("dd/MM/yyyy")</span>
+                        </div>
+                    </div>
+
+                    <div class="doc-bar"></div>
+
+                    <div class="doc-client">
+                        <div>
+                            <span class="doc-label">Cliente</span>
+                            <strong>@(string.IsNullOrWhiteSpace(cliente) ? "-" : cliente)</strong>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(empresa))
+                        {
+                            <div>
+                                <span class="doc-label">Empresa / Projeto</span>
+                                <strong>@empresa</strong>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="doc-plan">
+                        <div class="doc-plan-head">
+                            <div>
+                                <span class="doc-label">Plano selecionado</span>
+                                <h2>@planoSelecionado.Nome</h2>
+                                <span class="doc-plan-period">@PeriodoTexto</span>
+                            </div>
+                            <div class="doc-plan-price">
+                                @Moeda(PrecoTotalPlano)
+                                @if (AnosEfetivos > 1)
+                                {
+                                    <span class="doc-plan-price-sub">@Moeda(PrecoEfetivo) / ano</span>
+                                }
+                            </div>
+                        </div>
+                        <ul class="doc-plan-items">
+                            @foreach (var item in ServicosDaProposta)
+                            {
+                                <li class="@(ItensACombinar.Contains(item) ? "a-combinar" : "")">@item</li>
+                            }
+                        </ul>
+                    </div>
+
+                    <div class="doc-payment">
+                        <h3>Formas de pagamento</h3>
+                        <div class="pay-options">
+                            <div class="pay-option">
+                                <span class="doc-label">Opção 1</span>
+                                <strong class="pay-option-title">Entrada + parcelas</strong>
+                                <div class="pay-option-big"><small class="pay-option-prefix">@(ParcelasEfetivas)x de</small> @Moeda(ValorParcela)</div>
+                                <span class="pay-option-sub">@(EntradaEfetiva > 0 ? $"+ entrada de {Moeda(EntradaEfetiva)}" : "sem entrada")</span>
+                                <div class="doc-line">
+                                    <span>Entrada</span>
+                                    <span>@Moeda(EntradaEfetiva)</span>
+                                </div>
+                                <div class="doc-line">
+                                    <span>Parcelas @(jurosMes > 0 ? $"({jurosMes:0.#}% a.m.)" : "(sem juros)")</span>
+                                    <span>@ParcelasEfetivas x @Moeda(ValorParcela)</span>
+                                </div>
+                                <div class="doc-line doc-total">
+                                    <span>Total</span>
+                                    <span>@Moeda(TotalParcelado)</span>
+                                </div>
+                            </div>
+
+                            <div class="pay-option">
+                                <span class="doc-label">Opção 2</span>
+                                <strong class="pay-option-title">À vista</strong>
+                                <div class="pay-option-big">@Moeda(TotalAvista)</div>
+                                <span class="pay-option-sub">@(DescontoEfetivo > 0 ? $"com {DescontoEfetivo:0.#}% de desconto" : "pagamento único")</span>
+                                <div class="doc-line">
+                                    <span>Valor do plano</span>
+                                    <span>@Moeda(PrecoTotalPlano)</span>
+                                </div>
+                                @if (TotalExtrasFixos > 0)
+                                {
+                                    <div class="doc-line">
+                                        <span>Serviços extras</span>
+                                        <span>+ @Moeda(TotalExtrasFixos)</span>
+                                    </div>
+                                }
+                                @if (DescontoEfetivo > 0)
+                                {
+                                    <div class="doc-line">
+                                        <span>Desconto</span>
+                                        <span>- @Moeda(ValorDesconto)</span>
+                                    </div>
+                                }
+                                <div class="doc-line doc-total">
+                                    <span>Total</span>
+                                    <span>@Moeda(TotalAvista)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(observacoes))
+                    {
+                        <div class="doc-notes">
+                            <span class="doc-label">Observações</span>
+                            <p>@observacoes</p>
+                        </div>
+                    }
+
+                    <div class="doc-footer">
+                        <span>Proposta válida por 15 dias.</span>
+                        <span>NYVEL · Assessoria Digital · @@nyveldigital</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+}
+
+@code {
+    private static readonly CultureInfo PtBr = CultureInfo.GetCultureInfo("pt-BR");
+
+    // Planilha
+    private List<PlanoPlanilha> planos = new();
+    private bool carregando = true;
+    private string? erro;
+    private DateTime? atualizadoEm;
+
+    // Novo serviço
+    private string novoServico = "";
+    private HashSet<string> planosNovoServico = new();
+    private bool salvando;
+    private string? mensagemServico;
+    private bool servicoOk;
+
+    // Editor
+    private enum AbaEditor { Precos, Servicos, NovoPlano }
+    private bool editorAberto;
+    private AbaEditor abaEditor = AbaEditor.Precos;
+    private bool salvandoEditor;
+    private string? mensagemEditor;
+    private bool editorOk;
+    private readonly Dictionary<string, string> precosEdicao = new();
+    private string novoPlanoNome = "";
+    private decimal novoPlanoPreco;
+
+    // Orçamento
+    private PlanoPlanilha? planoSelecionado;
+    private HashSet<string> servicosMarcados = new();
+    private decimal preco;
+    private int anos = 1;
+
+    private string cliente = "";
+    private string empresa = "";
+    private string observacoes = "";
+
+    private decimal descontoAvista = 0;
+    private decimal entrada = 0;
+    private int parcelas = 3;
+    private decimal jurosMes = 0;
+
+    private readonly string numeroOrcamento = DateTime.Now.ToString("yyyyMMdd-HHmm");
+    private bool gerando;
+    private bool gerandoCatalogo;
+
+    private async Task BaixarCatalogo()
+    {
+        if (planos.Count == 0) return;
+        gerandoCatalogo = true;
+        try
+        {
+            var dados = new
+            {
+                data = DateTime.Now.ToString("dd/MM/yyyy"),
+                planos = planos.Select(p => new
+                {
+                    nome = p.Nome,
+                    preco = Moeda(p.Preco),
+                    parcela = Moeda(Math.Round(p.Preco / 12m, 2)),
+                    avista = Moeda(p.Preco),
+                    servicos = p.Servicos
+                }).ToList()
+            };
+            await JS.InvokeVoidAsync("nyvelPdf.gerarCatalogo", dados, $"planos-nyvel-{DateTime.Now:yyyy-MM-dd}.pdf");
+        }
+        finally
+        {
+            gerandoCatalogo = false;
+        }
+    }
+
+    protected override async Task OnInitializedAsync() => await CarregarPlanos(false);
+
+    private async Task CarregarPlanos(bool forcar)
+    {
+        carregando = true;
+        erro = null;
+        try
+        {
+            planos = await Planilha.CarregarAsync(forcar);
+            atualizadoEm = DateTime.Now;
+
+            if (planos.Count == 0)
+                erro = "A planilha não tem nenhuma coluna no formato \"NOME DO PLANO: preço\".";
+
+            // Mantém o plano escolhido, agora com os dados atualizados.
+            if (planoSelecionado is not null)
+            {
+                var atual = planos.FirstOrDefault(p => p.Titulo == planoSelecionado.Titulo);
+                if (atual is null)
+                {
+                    planoSelecionado = null;
+                }
+                else
+                {
+                    var novos = atual.Servicos.Except(planoSelecionado.Servicos);
+                    servicosMarcados.IntersectWith(atual.Servicos);
+                    servicosMarcados.UnionWith(novos);
+                    planoSelecionado = atual;
+                }
+            }
+
+            if (planosNovoServico.Count == 0)
+                planosNovoServico = planos.Select(p => p.Titulo).ToHashSet();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            erro = "Sem conexão com o Google. Verifique a internet e clique em Atualizar.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            erro = ex.Message;
+        }
+        finally
+        {
+            carregando = false;
+        }
+    }
+
+    private async Task SelecionarPlano(PlanoPlanilha p, bool rolar = true)
+    {
+        planoSelecionado = p;
+        preco = p.Preco;
+        anos = 1;
+        servicosMarcados = p.Servicos.ToHashSet();
+
+        if (rolar)
+        {
+            StateHasChanged();
+            await Task.Yield();
+            await JS.InvokeVoidAsync("nyvelUi.rolarPara", "montar");
+        }
+    }
+
+    private void AlternarServico(string s, bool marcado)
+    {
+        if (marcado) servicosMarcados.Add(s); else servicosMarcados.Remove(s);
+    }
+
+    private void AlternarPlanoNovoServico(string titulo, bool marcado)
+    {
+        if (marcado) planosNovoServico.Add(titulo); else planosNovoServico.Remove(titulo);
+    }
+
+    private async Task AdicionarServico()
+    {
+        salvando = true;
+        mensagemServico = null;
+        try
+        {
+            var nome = novoServico.Trim();
+            var r = await Planilha.AdicionarServicoAsync(nome, planosNovoServico.ToList());
+            servicoOk = r.Ok;
+            mensagemServico = r.Mensagem;
+            if (r.Ok)
+            {
+                novoServico = "";
+                planos = await Planilha.CarregarAsync();
+                if (planoSelecionado is not null && planosNovoServico.Contains(planoSelecionado.Titulo))
+                    servicosMarcados.Add(nome);
+            }
+        }
+        finally
+        {
+            salvando = false;
+        }
+    }
+
+    // ----- Editor -----
+    private string ObterPrecoEdicao(string titulo)
+    {
+        if (precosEdicao.TryGetValue(titulo, out var v)) return v;
+        var p = planos.FirstOrDefault(x => x.Titulo == titulo);
+        return p is null ? "" : p.Preco.ToString("0.##", CultureInfo.InvariantCulture);
+    }
+
+    private void DefinirPrecoEdicao(string titulo, string? valor) => precosEdicao[titulo] = valor ?? "";
+
+    private async Task SalvarPreco(PlanoPlanilha p)
+    {
+        if (!decimal.TryParse(ObterPrecoEdicao(p.Titulo), NumberStyles.Number, CultureInfo.InvariantCulture, out var novo) &&
+            !decimal.TryParse(ObterPrecoEdicao(p.Titulo), NumberStyles.Number, PtBr, out novo))
+        {
+            editorOk = false;
+            mensagemEditor = "Valor inválido.";
+            return;
+        }
+
+        salvandoEditor = true;
+        mensagemEditor = null;
+        try
+        {
+            var r = await Planilha.DefinirPrecoAsync(p.Titulo, novo);
+            editorOk = r.Ok;
+            mensagemEditor = r.Mensagem;
+            if (r.Ok)
+            {
+                planos = await Planilha.CarregarAsync();
+                precosEdicao.Remove(p.Titulo);
+                if (planoSelecionado?.Titulo == p.Titulo) preco = novo;
+            }
+        }
+        finally
+        {
+            salvandoEditor = false;
+        }
+    }
+
+    private async Task RemoverServico(string titulo, string servico)
+    {
+        salvandoEditor = true;
+        mensagemEditor = null;
+        try
+        {
+            var r = await Planilha.RemoverServicoAsync(servico, new[] { titulo });
+            editorOk = r.Ok;
+            mensagemEditor = r.Mensagem;
+            if (r.Ok)
+            {
+                planos = await Planilha.CarregarAsync();
+                servicosMarcados.Remove(servico);
+            }
+        }
+        finally
+        {
+            salvandoEditor = false;
+        }
+    }
+
+    private async Task CriarPlano()
+    {
+        salvandoEditor = true;
+        mensagemEditor = null;
+        try
+        {
+            var r = await Planilha.CriarPlanoAsync(novoPlanoNome.Trim(), Math.Max(0, novoPlanoPreco));
+            editorOk = r.Ok;
+            mensagemEditor = r.Mensagem;
+            if (r.Ok)
+            {
+                novoPlanoNome = "";
+                novoPlanoPreco = 0;
+                planos = await Planilha.CarregarAsync(forcar: true);
+                planosNovoServico = planos.Select(x => x.Titulo).ToHashSet();
+            }
+        }
+        finally
+        {
+            salvandoEditor = false;
+        }
+    }
+    private IEnumerable<string> ServicosDaProposta =>
+        (planoSelecionado?.Servicos.Where(servicosMarcados.Contains) ?? Enumerable.Empty<string>())
+            .Concat(servicosExtras.Select(TextoServicoExtra));
+
+    // Serviços digitados só para este cliente: entram no PDF, mas não vão para a planilha.
+    // "A combinar" aparece só como texto; "valor fixo" soma no total das formas de pagamento.
+    private sealed class ServicoExtra
+    {
+        public string Nome { get; init; } = "";
+        public bool ValorFixo { get; init; }
+        public decimal Valor { get; init; }
+    }
+
+    private readonly List<ServicoExtra> servicosExtras = new();
+    private string novoServicoExtra = "";
+    private bool novoExtraValorFixo;
+    private decimal novoExtraValor;
+
+    private bool PodeAdicionarExtra =>
+        !string.IsNullOrWhiteSpace(novoServicoExtra) && (!novoExtraValorFixo || novoExtraValor > 0);
+
+    private static string TextoServicoExtra(ServicoExtra s) =>
+        s.ValorFixo ? $"{s.Nome} ({Moeda(s.Valor)})" : $"{s.Nome} (valor a combinar)";
+
+    private HashSet<string> ItensACombinar =>
+        servicosExtras.Where(s => !s.ValorFixo).Select(TextoServicoExtra).ToHashSet();
+
+    private void AdicionarServicoExtra()
+    {
+        if (!PodeAdicionarExtra) return;
+        var nome = novoServicoExtra.Trim();
+        var jaExiste = servicosExtras.Select(s => s.Nome).Concat(planoSelecionado?.Servicos ?? new())
+            .Any(s => string.Equals(s, nome, StringComparison.OrdinalIgnoreCase));
+        if (!jaExiste)
+            servicosExtras.Add(new ServicoExtra
+            {
+                Nome = nome,
+                ValorFixo = novoExtraValorFixo,
+                Valor = novoExtraValorFixo ? Math.Round(novoExtraValor, 2) : 0
+            });
+        novoServicoExtra = "";
+        novoExtraValor = 0;
+    }
+
+    private void TeclaServicoExtra(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") AdicionarServicoExtra();
+    }
+
+    private void RemoverServicoExtra(ServicoExtra s) => servicosExtras.Remove(s);
+
+    private decimal PrecoEfetivo => Math.Max(0, preco);
+    private int AnosEfetivos => Math.Clamp(anos, 1, 10);
+    private decimal PrecoTotalPlano => PrecoEfetivo * AnosEfetivos;
+    // Soma dos serviços extras com valor fixo (cobrados uma vez, não multiplicam pelos anos).
+    private decimal TotalExtrasFixos => servicosExtras.Where(s => s.ValorFixo).Sum(s => s.Valor);
+    // Base usada nas formas de pagamento: plano + extras com valor fixo.
+    private decimal ValorBase => PrecoTotalPlano + TotalExtrasFixos;
+    private string PeriodoTexto => AnosEfetivos == 1 ? "Período: 1 ano" : $"Período: {AnosEfetivos} anos";
+    private decimal DescontoEfetivo => Math.Clamp(descontoAvista, 0, 100);
+
+    private decimal ValorDesconto => Math.Round(ValorBase * (DescontoEfetivo / 100m), 2);
+    private decimal TotalAvista => Math.Round(ValorBase - ValorDesconto, 2);
+
+    private decimal EntradaEfetiva => Math.Clamp(entrada, 0, ValorBase);
+    private int ParcelasEfetivas => Math.Clamp(parcelas, 1, 36);
+    private decimal BaseParcelada => Math.Max(0, ValorBase - EntradaEfetiva);
+
+    private decimal TotalParcelado
+    {
+        get
+        {
+            if (jurosMes <= 0)
+                return EntradaEfetiva + BaseParcelada;
+            // juros compostos sobre o saldo parcelado
+            var fator = (decimal)Math.Pow((double)(1 + Math.Min(jurosMes, 20) / 100m), ParcelasEfetivas);
+            return Math.Round(EntradaEfetiva + (BaseParcelada * fator), 2);
+        }
+    }
+
+    private decimal ValorParcela =>
+        Math.Round((TotalParcelado - EntradaEfetiva) / ParcelasEfetivas, 2);
+
+    // Formato pt-BR com espaço comum (o PDF não lida bem com espaço não separável).
+    private static string Moeda(decimal v) =>
+        v.ToString("C", PtBr).Replace('\u00A0', ' ');
+
+    private object MontarDadosPdf()
+    {
+        var plano = planoSelecionado!;
+
+        var linhasAvista = new List<object> { new { rotulo = "Valor do plano", valor = Moeda(PrecoTotalPlano) } };
+        if (TotalExtrasFixos > 0)
+            linhasAvista.Add(new { rotulo = "Serviços extras", valor = "+ " + Moeda(TotalExtrasFixos) });
+        if (DescontoEfetivo > 0)
+            linhasAvista.Add(new { rotulo = $"Desconto ({DescontoEfetivo:0.#}%)", valor = "- " + Moeda(ValorDesconto) });
+
+        var juros = jurosMes > 0 ? $"Parcelas ({jurosMes:0.#}% a.m.)" : "Parcelas (sem juros)";
+        var linhasParcelado = new List<object>
+        {
+            new { rotulo = "Entrada", valor = Moeda(EntradaEfetiva) },
+            new { rotulo = juros, valor = $"{ParcelasEfetivas}x de {Moeda(ValorParcela)}" }
+        };
+
+        var opcoes = new List<object>
+        {
+            new
+            {
+                rotulo = "Opção 1",
+                titulo = "Entrada + parcelas",
+                prefixo = $"{ParcelasEfetivas}x de",
+                destaque = Moeda(ValorParcela),
+                subtitulo = EntradaEfetiva > 0 ? $"+ entrada de {Moeda(EntradaEfetiva)}" : "sem entrada",
+                linhas = linhasParcelado,
+                totalValor = Moeda(TotalParcelado)
+            },
+            new
+            {
+                rotulo = "Opção 2",
+                titulo = "À vista",
+                prefixo = "",
+                destaque = Moeda(TotalAvista),
+                subtitulo = DescontoEfetivo > 0 ? $"com {DescontoEfetivo:0.#}% de desconto" : "pagamento único",
+                linhas = linhasAvista,
+                totalValor = Moeda(TotalAvista)
+            }
+        };
+
+        return new
+        {
+            numero = numeroOrcamento,
+            data = DateTime.Now.ToString("dd/MM/yyyy"),
+            cliente = string.IsNullOrWhiteSpace(cliente) ? "Cliente" : cliente.Trim(),
+            empresa = empresa?.Trim() ?? "",
+            observacoes = observacoes?.Trim() ?? "",
+            plano = new
+            {
+                nome = plano.Nome,
+                preco = Moeda(PrecoTotalPlano),
+                periodo = PeriodoTexto,
+                anos = AnosEfetivos,
+                precoAno = Moeda(PrecoEfetivo),
+                // destaque do card: parcela grande, à vista pequeno
+                parcelaQtd = ParcelasEfetivas,
+                parcelaValor = Moeda(ValorParcela),
+                entrada = EntradaEfetiva > 0 ? Moeda(EntradaEfetiva) : "",
+                avista = Moeda(TotalAvista),
+                itens = ServicosDaProposta.ToList(),
+                // itens que recebem o ícone de exclamação amarelo em vez do check
+                alertas = servicosExtras.Where(s => !s.ValorFixo).Select(TextoServicoExtra).ToList()
+            },
+            opcoes
+        };
+    }
+
+    private async Task BaixarPdf()
+    {
+        if (planoSelecionado is null) return;
+        // Se ficou um serviço extra digitado sem clicar em "Adicionar", inclui antes de gerar.
+        AdicionarServicoExtra();
+        gerando = true;
+        StateHasChanged();
+        try
+        {
+            var nome = string.IsNullOrWhiteSpace(cliente) ? "cliente" : cliente.Trim().ToLowerInvariant();
+            nome = System.Text.RegularExpressions.Regex.Replace(nome, @"[^\p{L}\p{N}]+", "-").Trim('-');
+            var arquivo = $"orcamento-nyvel-{nome}.pdf";
+            await JS.InvokeVoidAsync("nyvelPdf.gerar", MontarDadosPdf(), arquivo);
+        }
+        finally
+        {
+            gerando = false;
+        }
+    }
+}

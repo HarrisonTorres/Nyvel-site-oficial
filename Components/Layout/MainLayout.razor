@@ -1,0 +1,55 @@
+@inherits LayoutComponentBase
+
+<div class="site">
+    <NavMenu />
+
+    <main class="site-main">
+        @Body
+    </main>
+
+    <footer class="site-footer">
+        <div class="container footer-grid">
+            <div class="footer-brand">
+                <a class="brand" href="/">
+                    <img src="img/logo.jpg" alt="NYVEL" class="brand-logo" />
+                    <span class="brand-name">NYVEL</span>
+                </a>
+                <p class="footer-tagline">Assessoria digital que leva a sua marca ao próximo nível.</p>
+            </div>
+
+            <div class="footer-col">
+                <h4>Navegação</h4>
+                <a href="/#servicos">Serviços</a>
+                <a href="/#sobre">Sobre</a>
+                <a href="/#trabalhos">Trabalhos</a>
+                <a href="orcamentos">Orçamentos</a>
+                <a href="/#contato">Contato</a>
+            </div>
+
+            <div class="footer-col">
+                <h4>Serviços</h4>
+                <a href="/#servicos">Gestão de redes sociais</a>
+                <a href="/#servicos">Tráfego pago</a>
+                <a href="/#servicos">Design e branding</a>
+                <a href="/#servicos">Sites e landing pages</a>
+            </div>
+
+            <div class="footer-col">
+                <h4>Fale com a gente</h4>
+                <a href="https://www.instagram.com/nyveldigital" target="_blank" rel="noopener">Instagram</a>
+                <a href="mailto:contato@nyvel.digital">contato@nyvel.digital</a>
+            </div>
+        </div>
+
+        <div class="container footer-bottom">
+            <span>© 2026 NYVEL · Assessoria Digital</span>
+            <span>Feito com estratégia e cafeína.</span>
+        </div>
+    </footer>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Ocorreu um erro inesperado.
+    <a href="." class="reload">Recarregar</a>
+    <span class="dismiss">🗙</span>
+</div>
