@@ -16,6 +16,7 @@ export const LIMITES = {
   descricao: 280,
   mensagem: 400,
   logoUrl: 500,
+  logoArquivo: 120_000, // ~90 KB de imagem; uma logo 200×200 em WebP fica bem abaixo disso
   valorMaxCentavos: 100_000_000, // R$ 1.000.000,00
 };
 
@@ -139,7 +140,10 @@ export function normalizarChave(tipo, chave) {
 
 // ---------------- Página de pagamento ----------------
 
-export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
+// Só formatos de imagem "comuns" (sem SVG, que pode carregar script).
+const LOGO_DATA_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/;
+
+export const SLUG_RE =/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
 
 const texto = (v, max) => String(v ?? '').trim().slice(0, max);
 
@@ -182,8 +186,15 @@ export function validarPagina(entrada) {
 
   dados.cor = /^#[0-9a-fA-F]{6}$/.test(e.cor ?? '') ? e.cor.toLowerCase() : '#2b8bff';
 
-  dados.logoUrl = texto(e.logoUrl, LIMITES.logoUrl);
-  if (dados.logoUrl) {
+  // Logo: link https:// ou imagem enviada pelo painel (já reduzida no navegador e embutida em base64).
+  const logo = String(e.logoUrl ?? '').trim();
+  dados.logoUrl = '';
+  if (logo.startsWith('data:')) {
+    if (!LOGO_DATA_RE.test(logo)) erros.logoUrl = 'Formato de imagem não aceito. Use PNG, JPG ou WebP.';
+    else if (logo.length > LIMITES.logoArquivo) erros.logoUrl = 'Imagem grande demais. Tente outra imagem.';
+    else dados.logoUrl = logo;
+  } else if (logo) {
+    dados.logoUrl = logo.slice(0, LIMITES.logoUrl);
     try {
       const u = new URL(dados.logoUrl);
       if (u.protocol !== 'https:') throw new Error();

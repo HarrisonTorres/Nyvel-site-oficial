@@ -263,10 +263,45 @@
                         </div>
                     </div>
                     <div class="field">
-                        <label for="f-logo">Logo (endereço da imagem) <small>(opcional)</small></label>
-                        <input id="f-logo" class="input" placeholder="https://..."
-                               @bind="editando.LogoUrl" @bind:event="oninput" @bind:after="AgendarPrevia" />
-                        <span class="block-hint">Sem logo, a página mostra as iniciais do nome.</span>
+                        <label>Logo <small>(opcional)</small></label>
+                        <div class="pix-logo">
+                            <div class="pix-logo-thumb" style="--c:@editando.Cor">
+                                @if (!string.IsNullOrEmpty(editando.LogoUrl))
+                                {
+                                    <img src="@editando.LogoUrl" alt="Logo" />
+                                }
+                                else
+                                {
+                                    <span>@Iniciais(editando.Titulo)</span>
+                                }
+                            </div>
+                            <div class="pix-logo-acoes">
+                                <div class="pix-logo-botoes">
+                                    <label class="btn btn-ghost btn-sm pix-upload @(enviandoLogo ? "carregando" : "")">
+                                        @(enviandoLogo ? "Reduzindo..." : "Enviar imagem")
+                                        <InputFile accept="image/*" OnChange="EnviarLogo" disabled="@enviandoLogo" />
+                                    </label>
+                                    @if (!string.IsNullOrEmpty(editando.LogoUrl))
+                                    {
+                                        <button type="button" class="btn btn-ghost btn-sm" @onclick="RemoverLogo">Remover</button>
+                                    }
+                                </div>
+                                @if (!LogoEnviada)
+                                {
+                                    <input id="f-logo" class="input" placeholder="ou cole o link: https://..."
+                                           @bind="editando.LogoUrl" @bind:event="oninput" @bind:after="AgendarPrevia" />
+                                }
+                                else
+                                {
+                                    <span class="block-hint">Imagem enviada e reduzida para @(logoInfo ?? "tamanho de logo").</span>
+                                }
+                            </div>
+                        </div>
+                        <span class="block-hint">Sem logo, a página mostra as iniciais do nome. Imagens quadradas ficam melhores.</span>
+                        @if (erroLogo is not null)
+                        {
+                            <span class="field-erro">@erroLogo</span>
+                        }
                         @Erro("logoUrl")
                     </div>
                     <div class="field">
@@ -337,6 +372,12 @@
     private bool salvando;
     private bool salvoAgora;
     private bool confirmarExclusao;
+
+    // Logo enviada
+    private bool enviandoLogo;
+    private string? erroLogo;
+    private string? logoInfo;
+    private bool LogoEnviada => editando?.LogoUrl.StartsWith("data:") == true;
     private string? mensagem;
     private bool mensagemOk;
 
@@ -467,6 +508,67 @@
     private void AoMudarNome()
     {
         nomeManual = true;
+        AgendarPrevia();
+    }
+
+    private static string Iniciais(string titulo) =>
+        string.Concat((titulo ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
+    /// <summary>
+    /// Reduz a imagem no próprio navegador (máx. 200×200, WebP) e guarda embutida na página.
+    /// Assim a logo fica com poucos KB e não precisa de outro serviço para hospedar.
+    /// </summary>
+    private async Task EnviarLogo(InputFileChangeEventArgs e)
+    {
+        if (editando is null) return;
+        erroLogo = null;
+        var arquivo = e.File;
+        if (!arquivo.ContentType.StartsWith("image/"))
+        {
+            erroLogo = "Escolha um arquivo de imagem (PNG, JPG ou WebP).";
+            return;
+        }
+
+        enviandoLogo = true;
+        try
+        {
+            // Tenta 200 px; se ainda ficar pesada (foto com muitos detalhes), tenta 128 px.
+            foreach (var lado in new[] { 200, 128 })
+            {
+                var reduzida = await arquivo.RequestImageFileAsync("image/webp", lado, lado);
+                await using var s = reduzida.OpenReadStream(maxAllowedSize: 500_000);
+                using var ms = new MemoryStream();
+                await s.CopyToAsync(ms);
+                var bytes = ms.ToArray();
+                if (bytes.Length > 85_000 && lado != 128) continue;
+                if (bytes.Length > 85_000) { erroLogo = "Não consegui deixar essa imagem leve o suficiente. Tente outra."; return; }
+
+                // O navegador pode devolver PNG se não souber gerar WebP: detecta pelos bytes.
+                var tipo = bytes.Length > 12 && bytes[8] == (byte)'W' && bytes[9] == (byte)'E' ? "image/webp"
+                         : bytes.Length > 3 && bytes[0] == 0x89 && bytes[1] == (byte)'P' ? "image/png"
+                         : "image/jpeg";
+                editando.LogoUrl = $"data:{tipo};base64,{Convert.ToBase64String(bytes)}";
+                logoInfo = $"até {lado}×{lado} px, {Math.Max(1, bytes.Length / 1024)} KB";
+                AgendarPrevia();
+                return;
+            }
+        }
+        catch (Exception)
+        {
+            erroLogo = "Não consegui ler essa imagem. Tente um PNG ou JPG.";
+        }
+        finally
+        {
+            enviandoLogo = false;
+        }
+    }
+
+    private void RemoverLogo()
+    {
+        if (editando is null) return;
+        editando.LogoUrl = "";
+        logoInfo = null;
+        erroLogo = null;
         AgendarPrevia();
     }
 

@@ -59,6 +59,19 @@ test('converte valores digitados em centavos', () => {
   assert.equal(paraCentavos('0'), null);
 });
 
+test('logo aceita link https ou imagem PNG/JPEG/WebP embutida, e recusa o resto', () => {
+  const base = { titulo: 'A', nome: 'A', cidade: 'A', tipoChave: 'email', chave: 'a@b.co' };
+  const logo = (l) => validarPagina({ ...base, logoUrl: l });
+  assert.equal(logo('https://ex.com/a.png').erros, undefined);
+  assert.equal(logo('data:image/webp;base64,UklGRg==').erros, undefined);
+  assert.equal(logo('data:image/webp;base64,UklGRg==').dados.logoUrl, 'data:image/webp;base64,UklGRg==');
+  assert.ok(logo('http://ex.com/a.png').erros.logoUrl);
+  assert.ok(logo('data:image/svg+xml;base64,PHN2Zz4=').erros.logoUrl);
+  assert.ok(logo('data:text/html;base64,PGI+').erros.logoUrl);
+  assert.ok(logo('data:image/png;base64,' + 'A'.repeat(130_000)).erros.logoUrl);
+  assert.equal(logo('').dados.logoUrl, '');
+});
+
 test('validarPagina aponta os campos com problema e ignora slug vindo do painel', () => {
   const r = validarPagina({ slug: 'padaria-joao', titulo: '', tipoChave: 'email', chave: 'x' });
   assert.ok(r.erros.titulo && r.erros.chave && r.erros.nome && r.erros.cidade);
