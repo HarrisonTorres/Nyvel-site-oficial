@@ -1,0 +1,20 @@
+# Cloudflare Pages: site Blazor (estático) + Pages Functions (pasta functions/).
+name = "nyvel"
+compatibility_date = "2026-10-19"
+pages_build_output_dir = "publish/wwwroot"
+
+[vars]
+SHEET_ID = "1zmbZvCscbTKWfXIsFNOo0OZdrDj0ibxfNMnwoKVAQNM"
+SHEET_GID = "0"
+
+# Onde ficam as páginas de pagamento Pix.
+# Namespace "nyvel-pix" na conta Cloudflare.
+[[kv_namespaces]]
+binding = "PIX"
+id = "318e8fd84c774e9a925b061ddbf5f7a4"
+
+# Segredos (não ficam neste arquivo):
+#   ADMIN_PASSWORD  senha do painel /pix e do editor de orçamentos
+#   APPS_SCRIPT_URL URL do Web App do Google Apps Script (gravar na planilha)
+#   SHEETS_TOKEN    token combinado com o Apps Script
+# Local: arquivo .dev.vars. Produção: npx wrangler pages secret put <NOME>

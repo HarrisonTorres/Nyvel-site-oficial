@@ -1,7 +1,8 @@
 @page "/orcamentos"
-@rendermode InteractiveServer
+@implements IDisposable
 @inject IJSRuntime JS
 @inject PlanilhaService Planilha
+@inject AdminSessao Admin
 @using System.Globalization
 
 <PageTitle>Orçamentos · NYVEL</PageTitle>
@@ -113,10 +114,17 @@
                         </div>
                     </div>
 
-                    @if (!Planilha.PodeGravar)
+                    @if (!Planilha.Configurado)
                     {
                         <div class="alert alert-info">
-                            A gravação ainda não está configurada. Siga o passo a passo em <code>planilha/LEIA-ME.md</code> (leva uns 5 minutos) e republique o <code>AppsScript.gs</code> com a versão nova.
+                            A gravação ainda não está configurada. Publique o <code>AppsScript.gs</code> e cadastre na Cloudflare os segredos <code>APPS_SCRIPT_URL</code> e <code>SHEETS_TOKEN</code>.
+                        </div>
+                    }
+                    else if (!Admin.Autenticado)
+                    {
+                        <div class="alert alert-info">
+                            Para editar a planilha, entre com a senha do painel.
+                            <AdminLogin />
                         </div>
                     }
 
@@ -601,7 +609,16 @@
         }
     }
 
-    protected override async Task OnInitializedAsync() => await CarregarPlanos(false);
+    protected override async Task OnInitializedAsync()
+    {
+        Admin.Mudou += AoMudarSessao;
+        await Admin.CarregarAsync();
+        await CarregarPlanos(false);
+    }
+
+    private void AoMudarSessao() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Admin.Mudou -= AoMudarSessao;
 
     private async Task CarregarPlanos(bool forcar)
     {

@@ -1,0 +1,41 @@
+@inject AdminSessao Admin
+
+<form class="admin-login" @onsubmit="Entrar">
+    <div class="field" style="margin-bottom: 0;">
+        <label for="senha-admin">@Rotulo</label>
+        <div class="admin-login-row">
+            <input id="senha-admin" class="input" type="password" autocomplete="current-password"
+                   @bind="senha" @bind:event="oninput" placeholder="Senha" disabled="@entrando" />
+            <button class="btn btn-primary btn-sm" type="submit" disabled="@(entrando || string.IsNullOrWhiteSpace(senha))">
+                @(entrando ? "Entrando..." : "Entrar")
+            </button>
+        </div>
+    </div>
+    @if (erro is not null)
+    {
+        <div class="alert alert-error" style="margin-top: 12px;">@erro</div>
+    }
+</form>
+
+@code {
+    [Parameter] public string Rotulo { get; set; } = "Senha do painel";
+
+    private string senha = "";
+    private string? erro;
+    private bool entrando;
+
+    private async Task Entrar()
+    {
+        entrando = true;
+        erro = null;
+        try
+        {
+            erro = await Admin.EntrarAsync(senha);
+            if (erro is null) senha = "";
+        }
+        finally
+        {
+            entrando = false;
+        }
+    }
+}

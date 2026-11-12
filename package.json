@@ -1,0 +1,14 @@
+{
+  "name": "nyvel-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "dotnet publish -c Release -o publish --nologo",
+    "dev": "npm run build && npx --yes wrangler@4 pages dev",
+    "deploy": "npm run build && npx --yes wrangler@4 pages deploy",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "qrcode-generator": "1.4.4"
+  }
+}
