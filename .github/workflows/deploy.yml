@@ -1,0 +1,46 @@
+# A cada push na main: compila o site (.NET), roda os testes e publica na Cloudflare Pages (nyvel.pages.dev).
+name: Publicar na Cloudflare
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # permite publicar manualmente pela aba Actions
+
+concurrency:
+  group: publicar-producao
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes do gerador Pix
+        run: npm test
+
+      - name: Compilar o site
+        run: dotnet publish -c Release -o publish --nologo
+
+      - name: Publicar na Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: e7dd67cb181017f3b6416afb45325108
+          wranglerVersion: "4"
+          command: pages deploy --project-name nyvel --branch main --commit-hash ${{ github.sha }}
