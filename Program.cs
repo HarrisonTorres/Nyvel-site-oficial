@@ -11,5 +11,6 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 builder.Services.AddScoped(_ => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 builder.Services.AddScoped<AdminSessao>();
 builder.Services.AddScoped<PlanilhaService>();
+builder.Services.AddScoped<PixService>();
 
 await builder.Build().RunAsync();

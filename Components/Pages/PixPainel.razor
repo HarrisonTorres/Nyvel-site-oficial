@@ -1,0 +1,603 @@
+@page "/pix"
+@implements IDisposable
+@using System.Globalization
+@inject PixService Pix
+@inject AdminSessao Admin
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>Painel Pix · NYVEL</PageTitle>
+
+<section class="pix-hero">
+    <div class="container">
+        <span class="eyebrow">Painel Pix</span>
+        <h1>Páginas de pagamento</h1>
+        <p>Crie a página Pix de um cliente, copie o link e grave na plaquinha NFC.</p>
+    </div>
+</section>
+
+<section class="container pix-area">
+    @if (!Admin.Autenticado)
+    {
+        <div class="orc-block pix-login">
+            <h3>Entrar no painel</h3>
+            <AdminLogin />
+        </div>
+    }
+    else if (editando is null)
+    {
+        <!-- ================= LISTA ================= -->
+        <div class="pix-toolbar">
+            <h2>@(paginas.Count == 1 ? "1 página" : $"{paginas.Count} páginas")</h2>
+            <div class="pix-toolbar-acoes">
+                <button class="btn btn-ghost btn-sm" @onclick="Sair">Sair</button>
+                <button class="btn btn-primary btn-sm" @onclick="Nova">+ Novo Pix</button>
+            </div>
+        </div>
+
+        @if (erroLista is not null)
+        {
+            <div class="alert alert-error">@erroLista</div>
+        }
+
+        @if (carregandoLista)
+        {
+            <p class="pix-vazio">Carregando...</p>
+        }
+        else if (paginas.Count == 0)
+        {
+            <div class="pix-vazio orc-block">
+                <h3>Nenhuma página ainda</h3>
+                <p>Comece criando a página Pix do seu primeiro cliente.</p>
+                <button class="btn btn-primary" @onclick="Nova">Criar primeira página</button>
+            </div>
+        }
+        else
+        {
+            <div class="pix-lista">
+                @foreach (var p in paginas)
+                {
+                    <article class="pix-item @(p.Ativo ? "" : "inativo")">
+                        <div class="pix-item-info">
+                            <h3>@(p.Titulo ?? p.Slug)</h3>
+                            <a class="pix-item-link" href="@Link(p.Slug)" target="_blank" rel="noopener">/p/@p.Slug</a>
+                            <div class="pix-item-meta">
+                                <span class="pix-tag">@(p.ValorCentavos is long v ? Reais(v) : "Valor livre")</span>
+                                @if (!p.Ativo)
+                                {
+                                    <span class="pix-tag off">Desativada</span>
+                                }
+                            </div>
+                        </div>
+                        <div class="pix-item-acoes">
+                            <button class="btn btn-ghost btn-sm" @onclick="() => Copiar(Link(p.Slug), p.Slug)">
+                                @(copiado == p.Slug ? "Copiado ✓" : "Copiar link")
+                            </button>
+                            <button class="btn btn-ghost btn-sm" @onclick="() => Duplicar(p.Slug)">Duplicar</button>
+                            <button class="btn btn-primary btn-sm" @onclick="() => Editar(p.Slug)">Editar</button>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    }
+    else
+    {
+        <!-- ================= EDITOR ================= -->
+        <div class="pix-toolbar">
+            <h2>@(nova ? "Novo Pix" : $"Editar: {editando.Titulo}")</h2>
+            <div class="pix-toolbar-acoes">
+                <button class="btn btn-ghost btn-sm" @onclick="Voltar">← Voltar para a lista</button>
+            </div>
+        </div>
+
+        @if (salvoAgora && !nova)
+        {
+            var link = Link(editando.Slug);
+            <div class="pix-pronto orc-block">
+                <img class="pix-pronto-qr" src="@($"api/qr?t={Uri.EscapeDataString(link)}")" alt="QR Code do link da página" />
+                <div>
+                    <h3>Pronto! A página está no ar.</h3>
+                    <div class="pix-pronto-link">
+                        <code>@link</code>
+                    </div>
+                    <div class="pix-pronto-acoes">
+                        <button class="btn btn-primary btn-sm" @onclick="() => Copiar(link, editando.Slug)">
+                            @(copiado == editando.Slug ? "Link copiado ✓" : "Copiar link")
+                        </button>
+                        <a class="btn btn-ghost btn-sm" href="@link" target="_blank" rel="noopener">Abrir página</a>
+                        <a class="btn btn-ghost btn-sm" href="@($"api/qr?t={Uri.EscapeDataString(link)}&baixar=qr-{editando.Slug}")">Baixar QR do link</a>
+                    </div>
+                    <p class="block-hint">
+                        Plaquinha NFC: no app <b>NFC Tools</b>, vá em Gravar → Adicionar registro → <b>URL/URI</b>,
+                        cole o link e encoste a plaquinha. Se mudar valor ou mensagem depois, não precisa regravar.
+                    </p>
+                </div>
+            </div>
+        }
+
+        @if (mensagem is not null)
+        {
+            <div class="alert @(mensagemOk ? "alert-ok" : "alert-error")" style="margin-bottom: 18px;">@mensagem</div>
+        }
+
+        <div class="pix-editor">
+            <form class="pix-form" @onsubmit="Salvar">
+                <!-- Negócio -->
+                <div class="orc-block">
+                    <h3>Negócio</h3>
+                    <div class="field">
+                        <label for="f-titulo">Nome que aparece na página</label>
+                        <input id="f-titulo" class="input" maxlength="60" placeholder="Ex.: Padaria do João"
+                               @bind="editando.Titulo" @bind:event="oninput" @bind:after="AoMudarTitulo" />
+                        @Erro("titulo")
+                    </div>
+                    <div class="field">
+                        <label>Link da página</label>
+                        <div class="pix-slug">
+                            @if (nova)
+                            {
+                                <span>@(Nav.BaseUri)p/<i>código gerado ao criar</i></span>
+                            }
+                            else
+                            {
+                                <span>@(Nav.BaseUri)p/<b>@editando.Slug</b></span>
+                            }
+                        </div>
+                        <span class="block-hint">
+                            O código é aleatório e exclusivo deste cliente: não dá para adivinhar, não muda
+                            e nunca é reaproveitado, nem depois de a página ser apagada.
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Pix -->
+                <div class="orc-block">
+                    <h3>Dados do Pix</h3>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="f-tipo">Tipo de chave</label>
+                            <select id="f-tipo" class="input" @bind="editando.TipoChave" @bind:after="AgendarPrevia">
+                                <option value="telefone">Celular</option>
+                                <option value="cpf_cnpj">CPF / CNPJ</option>
+                                <option value="email">E-mail</option>
+                                <option value="aleatoria">Chave aleatória</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="f-chave">Chave Pix</label>
+                            <input id="f-chave" class="input" maxlength="80" placeholder="@PlaceholderChave"
+                                   @bind="editando.Chave" @bind:event="oninput" @bind:after="AgendarPrevia" />
+                            @Erro("chave")
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="f-nome">Nome do recebedor</label>
+                            <input id="f-nome" class="input" maxlength="60" placeholder="Como aparece no banco"
+                                   @bind="editando.Nome" @bind:event="oninput" @bind:after="AoMudarNome" />
+                            @Erro("nome")
+                        </div>
+                        <div class="field">
+                            <label for="f-cidade">Cidade</label>
+                            <input id="f-cidade" class="input" maxlength="40" placeholder="Ex.: Campinas"
+                                   @bind="editando.Cidade" @bind:event="oninput" @bind:after="AgendarPrevia" />
+                            @Erro("cidade")
+                        </div>
+                    </div>
+                    <span class="block-hint">No QR Code o nome vai sem acentos e com até 25 letras, e a cidade com até 15. É uma regra do Pix.</span>
+                </div>
+
+                <!-- Valor -->
+                <div class="orc-block">
+                    <h3>Valor</h3>
+                    <div class="pix-opcoes">
+                        <label class="pix-opcao @(valorFixo ? "" : "on")">
+                            <input type="radio" name="modo-valor" checked="@(!valorFixo)" @onchange="() => DefinirModoValor(false)" />
+                            <span><b>Cliente define</b><small>Quem paga escolhe o valor</small></span>
+                        </label>
+                        <label class="pix-opcao @(valorFixo ? "on" : "")">
+                            <input type="radio" name="modo-valor" checked="@valorFixo" @onchange="() => DefinirModoValor(true)" />
+                            <span><b>Valor fixo</b><small>Sempre o mesmo valor</small></span>
+                        </label>
+                    </div>
+                    @if (valorFixo)
+                    {
+                        <div class="field" style="margin-top: 16px;">
+                            <label for="f-valor">Valor (R$)</label>
+                            <input id="f-valor" class="input" inputmode="decimal" placeholder="25,00"
+                                   @bind="valorTexto" @bind:event="oninput" @bind:after="AgendarPrevia" />
+                            @if (valorTexto.Length > 0 && Centavos(valorTexto) is null)
+                            {
+                                <span class="field-erro">Digite um valor como 25,00</span>
+                            }
+                            @Erro("valorCentavos")
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="check" style="margin-top: 14px;">
+                            <input type="checkbox" @bind="editando.ClienteDefineValor" @bind:after="AgendarPrevia" />
+                            <span>Mostrar campo para o cliente digitar o valor na página (o QR já sai com o valor)</span>
+                        </label>
+                    }
+                </div>
+
+                <!-- Textos -->
+                <div class="orc-block">
+                    <h3>Textos da página</h3>
+                    <div class="field">
+                        <label for="f-msg">Mensagem em destaque <small>(opcional)</small></label>
+                        <textarea id="f-msg" class="input" rows="2" maxlength="400" placeholder="Ex.: Obrigado pela preferência! Volte sempre 💛"
+                                  @bind="editando.Mensagem" @bind:event="oninput" @bind:after="AgendarPrevia"></textarea>
+                    </div>
+                    <div class="field">
+                        <label for="f-desc">Descrição <small>(opcional)</small></label>
+                        <textarea id="f-desc" class="input" rows="2" maxlength="280" placeholder="Ex.: Pagamento de pães, bolos e salgados."
+                                  @bind="editando.Descricao" @bind:event="oninput" @bind:after="AgendarPrevia"></textarea>
+                    </div>
+                </div>
+
+                <!-- Extras -->
+                <div class="orc-block">
+                    <h3>Aparência e extras</h3>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="f-cor">Cor de destaque</label>
+                            <div class="pix-cor">
+                                <input id="f-cor" type="color" @bind="editando.Cor" @bind:event="oninput" @bind:after="AgendarPrevia" />
+                                <div class="pix-cores">
+                                    @foreach (var c in CoresProntas)
+                                    {
+                                        <button type="button" class="pix-cor-btn" style="background:@c" title="@c"
+                                                @onclick="() => { editando!.Cor = c; AgendarPrevia(); }"></button>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label for="f-wa">WhatsApp para comprovante <small>(opcional)</small></label>
+                            <input id="f-wa" class="input" inputmode="tel" placeholder="(11) 98765-4321"
+                                   @bind="editando.Whatsapp" @bind:event="oninput" @bind:after="AgendarPrevia" />
+                            @Erro("whatsapp")
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="f-logo">Logo (endereço da imagem) <small>(opcional)</small></label>
+                        <input id="f-logo" class="input" placeholder="https://..."
+                               @bind="editando.LogoUrl" @bind:event="oninput" @bind:after="AgendarPrevia" />
+                        <span class="block-hint">Sem logo, a página mostra as iniciais do nome.</span>
+                        @Erro("logoUrl")
+                    </div>
+                    <div class="field">
+                        <label for="f-txid">Identificador <small>(opcional, só letras e números)</small></label>
+                        <input id="f-txid" class="input" maxlength="25" placeholder="Ex.: LOJA1"
+                               @bind="editando.Txid" @bind:event="oninput" @bind:after="AgendarPrevia" />
+                        <span class="block-hint">Aparece no extrato de quem recebe. Útil para separar caixas ou lojas.</span>
+                    </div>
+                    <label class="check">
+                        <input type="checkbox" @bind="editando.Ativo" />
+                        <span>Página ativa (desmarque para pausar sem apagar)</span>
+                    </label>
+                </div>
+
+                <div class="pix-form-acoes">
+                    <button type="submit" class="btn btn-primary" disabled="@salvando">
+                        @(salvando ? "Salvando..." : nova ? "Criar página" : "Salvar alterações")
+                    </button>
+                    @if (!nova)
+                    {
+                        <button type="button" class="btn btn-ghost pix-excluir" @onclick="Excluir" disabled="@salvando">
+                            @(confirmarExclusao ? "Clique de novo para apagar" : "Apagar página")
+                        </button>
+                    }
+                </div>
+            </form>
+
+            <aside class="pix-previa">
+                <div class="pix-previa-head">
+                    <span>Prévia ao vivo</span>
+                    @if (atualizandoPrevia)
+                    {
+                        <small>atualizando...</small>
+                    }
+                </div>
+                <div class="pix-celular">
+                    @if (previaHtml is not null)
+                    {
+                        <iframe title="Prévia da página de pagamento" srcdoc="@previaHtml"></iframe>
+                    }
+                    else
+                    {
+                        <div class="pix-previa-vazia">Preencha a chave Pix para ver como a página vai ficar.</div>
+                    }
+                </div>
+            </aside>
+        </div>
+    }
+</section>
+
+@code {
+    private static readonly CultureInfo PtBr = CultureInfo.GetCultureInfo("pt-BR");
+    private static readonly string[] CoresProntas = { "#2b8bff", "#16a34a", "#f97316", "#e11d48", "#7c3aed", "#0f172a" };
+
+    // Lista
+    private List<PixResumo> paginas = new();
+    private bool carregandoLista;
+    private string? erroLista;
+    private string? copiado;
+
+    // Editor
+    private PixPagina? editando;
+    private bool nova;
+    private bool nomeManual;
+    private bool valorFixo;
+    private string valorTexto = "";
+    private Dictionary<string, string> erros = new();
+    private bool salvando;
+    private bool salvoAgora;
+    private bool confirmarExclusao;
+    private string? mensagem;
+    private bool mensagemOk;
+
+    // Prévia
+    private string? previaHtml;
+    private bool atualizandoPrevia;
+    private CancellationTokenSource? ctsPrevia;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Admin.Mudou += AoMudarSessao;
+        await Admin.CarregarAsync();
+        if (Admin.Autenticado) await CarregarLista();
+    }
+
+    private async void AoMudarSessao()
+    {
+        await InvokeAsync(async () =>
+        {
+            if (Admin.Autenticado && editando is null) await CarregarLista();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        Admin.Mudou -= AoMudarSessao;
+        ctsPrevia?.Cancel();
+    }
+
+    private string Link(string slug) => $"{Nav.BaseUri}p/{slug}";
+
+    private static string Reais(long centavos) => (centavos / 100m).ToString("C", PtBr);
+
+    private async Task CarregarLista()
+    {
+        carregandoLista = true;
+        erroLista = null;
+        (paginas, erroLista) = await Pix.ListarAsync();
+        carregandoLista = false;
+    }
+
+    private async Task Sair()
+    {
+        await Admin.SairAsync();
+        paginas.Clear();
+    }
+
+    private async Task Copiar(string texto, string marcador)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", texto);
+            copiado = marcador;
+            StateHasChanged();
+            await Task.Delay(2000);
+            if (copiado == marcador) copiado = null;
+        }
+        catch (JSException)
+        {
+            mensagemOk = false;
+            mensagem = "Não consegui copiar. Selecione o link e copie manualmente.";
+        }
+    }
+
+    // ---------------- Abrir editor ----------------
+
+    private void Nova() => AbrirEditor(new PixPagina(), nova: true);
+
+    private async Task Editar(string slug)
+    {
+        var r = await Pix.ObterAsync(slug);
+        if (r.Pagina is null) { erroLista = r.Erro; return; }
+        AbrirEditor(r.Pagina, nova: false);
+    }
+
+    private async Task Duplicar(string slug)
+    {
+        var r = await Pix.ObterAsync(slug);
+        if (r.Pagina is null) { erroLista = r.Erro; return; }
+        var copia = r.Pagina.Copia();
+        copia.Slug = "";
+        copia.Titulo += " (cópia)";
+        AbrirEditor(copia, nova: true);
+        nomeManual = true;
+    }
+
+    private void AbrirEditor(PixPagina p, bool nova)
+    {
+        editando = p;
+        this.nova = nova;
+        nomeManual = !nova;
+        valorFixo = p.ValorCentavos is not null;
+        valorTexto = p.ValorCentavos is long v ? (v / 100m).ToString("0.00", PtBr) : "";
+        erros = new();
+        mensagem = null;
+        salvoAgora = false;
+        confirmarExclusao = false;
+        previaHtml = null;
+        AgendarPrevia();
+    }
+
+    private async Task Voltar()
+    {
+        ctsPrevia?.Cancel();
+        editando = null;
+        mensagem = null;
+        await CarregarLista();
+    }
+
+    // ---------------- Campos ----------------
+
+    private string PlaceholderChave => editando?.TipoChave switch
+    {
+        "cpf_cnpj" => "000.000.000-00",
+        "email" => "loja@email.com",
+        "aleatoria" => "123e4567-e89b-12d3-a456-426614174000",
+        _ => "(11) 98765-4321",
+    };
+
+    private void AoMudarTitulo()
+    {
+        if (editando is null) return;
+        if (!nomeManual) editando.Nome = editando.Titulo;
+        AgendarPrevia();
+    }
+
+    private void AoMudarNome()
+    {
+        nomeManual = true;
+        AgendarPrevia();
+    }
+
+    private void DefinirModoValor(bool fixo)
+    {
+        valorFixo = fixo;
+        AgendarPrevia();
+    }
+
+    private static long? Centavos(string texto)
+    {
+        var t = (texto ?? "").Trim().Replace("R$", "").Trim();
+        if (t.Length == 0) return null;
+        if (!decimal.TryParse(t, NumberStyles.Number, PtBr, out var v) || v <= 0 || v > 1_000_000) return null;
+        return (long)Math.Round(v * 100, MidpointRounding.AwayFromZero);
+    }
+
+    private PixPagina ParaEnvio()
+    {
+        var p = editando!.Copia();
+        p.ValorCentavos = valorFixo ? Centavos(valorTexto) : null;
+        return p;
+    }
+
+    private RenderFragment Erro(string campo) => __builder =>
+    {
+        if (erros.TryGetValue(campo, out var e))
+        {
+            <span class="field-erro">@e</span>
+        }
+    };
+
+    // ---------------- Prévia ----------------
+
+    private async void AgendarPrevia()
+    {
+        if (editando is null) return;
+        ctsPrevia?.Cancel();
+        var cts = ctsPrevia = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(350, cts.Token);
+            atualizandoPrevia = true;
+            await InvokeAsync(StateHasChanged);
+
+            var (html, novosErros) = await Pix.PreviaAsync(ParaEnvio(), cts.Token);
+            if (cts.IsCancellationRequested) return;
+
+            previaHtml = html;
+            // Só mostra erro dos campos já preenchidos, para não "gritar" com o formulário vazio.
+            erros = novosErros.Where(e => CampoPreenchido(e.Key)).ToDictionary(e => e.Key, e => e.Value);
+            atualizandoPrevia = false;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (TaskCanceledException) { }
+        catch (OperationCanceledException) { }
+    }
+
+    private bool CampoPreenchido(string campo) => campo switch
+    {
+        "titulo" => editando!.Titulo.Length > 0,
+        "nome" => editando!.Nome.Length > 0,
+        "cidade" => editando!.Cidade.Length > 0,
+        "chave" => editando!.Chave.Length > 0,
+        _ => true,
+    };
+
+    // ---------------- Salvar / excluir ----------------
+
+    private async Task Salvar()
+    {
+        if (editando is null) return;
+        if (valorFixo && Centavos(valorTexto) is null)
+        {
+            erros["valorCentavos"] = "Informe o valor fixo, ex.: 25,00";
+            mensagemOk = false;
+            mensagem = "Confira os campos destacados.";
+            return;
+        }
+
+        salvando = true;
+        mensagem = null;
+        try
+        {
+            var r = await Pix.SalvarAsync(ParaEnvio(), nova);
+            if (r.Ok && r.Pagina is not null)
+            {
+                ctsPrevia?.Cancel();
+                editando = r.Pagina;
+                nova = false;
+                nomeManual = true;
+                erros = new();
+                salvoAgora = true;
+                mensagemOk = true;
+                mensagem = null;
+                AgendarPrevia();
+            }
+            else
+            {
+                erros = r.Erros;
+                mensagemOk = false;
+                mensagem = r.Erro ?? "Não foi possível salvar.";
+            }
+        }
+        finally
+        {
+            salvando = false;
+        }
+    }
+
+    private async Task Excluir()
+    {
+        if (editando is null) return;
+        if (!confirmarExclusao)
+        {
+            confirmarExclusao = true;
+            return;
+        }
+
+        salvando = true;
+        var r = await Pix.ExcluirAsync(editando.Slug);
+        salvando = false;
+        if (r.Ok)
+        {
+            await Voltar();
+        }
+        else
+        {
+            mensagemOk = false;
+            mensagem = r.Erro;
+            confirmarExclusao = false;
+        }
+    }
+}
